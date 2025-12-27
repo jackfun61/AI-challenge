@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>AI Game hub</title>
+  <style>
+    body {
+      background: #0f1220;
+      color: white;
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+    }
+
+    h1 {
+      margin-bottom: 30px;
+    }
+
+    button {
+      width: 200px;
+      padding: 15px;
+      margin: 10px;
+      font-size: 18px;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: transform 0.2s, opacity 0.2s;
+    }
+
+    button:hover {
+      transform: scale(1.05);
+      opacity: 0.9;
+    }
+
+    .chatgpt { background: #10a37f; color: white; }
+    .grok { background: #1da1f2; color: white; }
+    .gemini { background: #8e75ff; color: white; }
+  </style>
+</head>
+<body>
+
+  <h1>Choose an AI 🤖</h1>
+
+  <button class="chatgpt" onclick="location.href='chatgpt.html'">
+    ChatGPT
+  </button>
+
+  <button class="grok" onclick="location.href='grok.html'">
+    Grok
+  </button>
+
+  <button class="gemini" onclick="location.href='gemini.html'">
+    Gemini
+  </button>
+
+</body>
+</html>
