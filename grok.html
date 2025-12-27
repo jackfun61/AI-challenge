@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Grok Sandbox</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        #instructions {
+            position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.6); color: white; padding: 15px; font-family: Arial; border-radius: 8px; z-index: 100;
+        }
+    </style>
+</head>
+<body>
+<div id="instructions">
+    <strong>Controls:</strong><br>
+    WASD: Move<br>
+    Space: Jump<br>
+    Arrow keys: Look around<br>
+    M: Mine/remove block (look at it)<br>
+    P: Place block<br>
+    1: Grass (green)<br>
+    2: Wood (brown)
+</div>
+
+<!-- Latest stable Three.js from jsDelivr -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.182.0/build/three.min.js"></script>
+
+<script>
+    const SIZE = 16;
+    const BLOCK_SIZE = 1;
+
+    // World: 0 = air, 1 = grass, 2 = wood
+    let world = Array.from({length: SIZE}, () => 
+        Array.from({length: SIZE}, () => Array(SIZE).fill(0)));
+
+    // Bottom layer = grass
+    for (let x = 0; x < SIZE; x++) {
+        for (let z = 0; z < SIZE; z++) {
+            world[x][0][z] = 1;
+        }
+    }
+
+    // Scene setup
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87ceeb);
+
+    const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // Lights
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(ambientLight);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+    dirLight.position.set(10, 20, 10);
+    scene.add(dirLight);
+
+    // Materials
+    const materials = [
+        null,
+        new THREE.MeshLambertMaterial({ color: 0x00aa00 }), // grass
+        new THREE.MeshLambertMaterial({ color: 0x8b4513 })  // wood
+    ];
+
+    const blocksGroup = new THREE.Group();
+    scene.add(blocksGroup);
+
+    function createBlock(x, y, z, type) {
+        const geometry = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+        const mesh = new THREE.Mesh(geometry, materials[type]);
+        mesh.position.set(x + 0.5, y + 0.5, z + 0.5);
+        mesh.userData = { x, y, z, type };
+        blocksGroup.add(mesh);
+    }
+
+    function rebuildWorld() {
+        blocksGroup.clear();
+        for (let x = 0; x < SIZE; x++) {
+            for (let y = 0; y < SIZE; y++) {
+                for (let z = 0; z < SIZE; z++) {
+                    if (world[x][y][z] !== 0) {
+                        createBlock(x, y, z, world[x][y][z]);
+                    }
+                }
+            }
+        }
+    }
+
+    rebuildWorld();
+
+    camera.position.set(SIZE / 2, 6, SIZE / 2 + 6);
+
+    const keys = {};
+    window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+    window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2(0, 0);
+
+    function getTargetBlock() {
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(blocksGroup.children);
+        if (intersects.length > 0) {
+            const obj = intersects[0].object;
+            const normal = intersects[0].face.normal.clone().round();
+            return { block: obj.userData, normal };
+        }
+        return null;
+    }
+
+    let currentType = 1;
+
+    window.addEventListener('keydown', e => {
+        if (e.key === '1') currentType = 1;
+        if (e.key === '2') currentType = 2;
+
+        if (e.key.toLowerCase() === 'm') {
+            const target = getTargetBlock();
+            if (target && target.block.y > 0) {
+                world[target.block.x][target.block.y][target.block.z] = 0;
+                rebuildWorld();
+            }
+        }
+
+        if (e.key.toLowerCase() === 'p') {
+            const target = getTargetBlock();
+            if (target) {
+                const {x, y, z} = target.block;
+                const nx = x + target.normal.x;
+                const ny = y + target.normal.y;
+                const nz = z + target.normal.z;
+                if (nx >= 0 && nx < SIZE && ny >= 0 && ny < SIZE && nz >= 0 && nz < SIZE &&
+                    world[nx][ny][nz] === 0) {
+                    world[nx][ny][nz] = currentType;
+                    rebuildWorld();
+                }
+            }
+        }
+    });
+
+    let velocityY = 0;
+    let canJump = false;
+
+    function animate() {
+        requestAnimationFrame(animate);
+
+        // Look
+        if (keys['arrowleft']) camera.rotation.y += 0.04;
+        if (keys['arrowright']) camera.rotation.y -= 0.04;
+        if (keys['arrowup']) camera.rotation.x = Math.max(camera.rotation.x - 0.04, -Math.PI/2 + 0.2);
+        if (keys['arrowdown']) camera.rotation.x = Math.min(camera.rotation.x + 0.04, Math.PI/2 - 0.2);
+
+        // Movement
+        const direction = new THREE.Vector3();
+        camera.getWorldDirection(direction);
+        direction.y = 0;
+        direction.normalize();
+
+        const right = new THREE.Vector3();
+        right.crossVectors(direction, new THREE.Vector3(0,1,0)).normalize();
+
+        const move = new THREE.Vector3();
+        if (keys['w']) move.add(direction);
+        if (keys['s']) move.sub(direction);
+        if (keys['a']) move.sub(right);
+        if (keys['d']) move.add(right);
+
+        if (move.length() > 0) {
+            move.normalize().multiplyScalar(0.2);
+            camera.position.add(move);
+        }
+
+        // Physics
+        velocityY -= 0.015;
+        if (keys[' '] && canJump) {
+            velocityY = 0.35;
+            canJump = false;
+        }
+        camera.position.y += velocityY;
+
+        const footY = Math.floor(camera.position.y - 1.8);
+        const px = Math.floor(camera.position.x);
+        const pz = Math.floor(camera.position.z);
+
+        if (footY >= 0 && world[px]?.[footY]?.[pz] !== 0) {
+            camera.position.y = footY + 1.8 + 1;
+            velocityY = 0;
+            canJump = true;
+        }
+
+        // Bounds
+        camera.position.x = Math.max(1, Math.min(SIZE-1, camera.position.x));
+        camera.position.z = Math.max(1, Math.min(SIZE-1, camera.position.z));
+        if (camera.position.y < 3) {
+            camera.position.y = 6;
+            velocityY = 0;
+            canJump = true;
+        }
+
+        renderer.render(scene, camera);
+    }
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    animate();
+</script>
+</body>
+</html>

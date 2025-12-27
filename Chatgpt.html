@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Chatgpts Sandbox</title>
+<style>
+  html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #hand {
+    position: absolute;
+    bottom: 50px;
+    right: 50px;
+    width: 50px;
+    height: 50px;
+    border: 3px solid #000;
+    background-color: green; /* default block: grass */
+  }
+  #fps {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    color: white;
+    font-family: monospace;
+    font-size: 18px;
+    background: rgba(0,0,0,0.5);
+    padding: 5px 10px;
+    border-radius: 5px;
+  }
+</style>
+</head>
+<body>
+<div id="hand"></div>
+<div id="fps">FPS: 0</div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.152.0/build/three.min.js"></script>
+<script>
+
+// Scene setup
+let scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87CEEB);
+
+let camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+let renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// Lights
+let light = new THREE.DirectionalLight(0xffffff, 1);
+light.position.set(10,20,10);
+scene.add(light);
+scene.add(new THREE.AmbientLight(0xffffff,0.5));
+
+// Materials
+let materials = {
+    grass: new THREE.MeshLambertMaterial({ color: 0x00ff00 }),
+    wood: new THREE.MeshLambertMaterial({ color: 0x8B4513 })
+};
+
+// Blocks container
+let blocks = {};
+function addBlock(x,y,z,type){
+    let key = `${x},${y},${z}`;
+    if(blocks[key]) return;
+    let geometry = new THREE.BoxGeometry(1,1,1);
+    let mesh = new THREE.Mesh(geometry, materials[type]);
+    mesh.position.set(x+0.5, y+0.5, z+0.5);
+    scene.add(mesh);
+    blocks[key] = mesh;
+}
+function removeBlock(x,y,z){
+    let key = `${x},${y},${z}`;
+    if(blocks[key]){
+        scene.remove(blocks[key]);
+        delete blocks[key];
+    }
+}
+
+// Generate 16x16 grass ground
+for(let x=0;x<16;x++){
+    for(let z=0;z<16;z++){
+        addBlock(x,0,z,'grass');
+    }
+}
+
+// Player setup
+let player = {
+    position: new THREE.Vector3(8,1,8),
+    velocityY: 0,
+    height: 1.8
+};
+let move = {forward:false,backward:false,left:false,right:false,jump:false};
+let keys = {ArrowUp:false,ArrowDown:false,ArrowLeft:false,ArrowRight:false};
+
+// Yaw/pitch hierarchy for camera
+let yawObject = new THREE.Object3D();
+yawObject.position.copy(player.position);
+scene.add(yawObject);
+
+let pitchObject = new THREE.Object3D();
+yawObject.add(pitchObject);
+
+pitchObject.add(camera);
+camera.position.set(0,player.height-0.3,0);
+
+// Look speed
+let lookSpeed = 0.03;
+function clampPitch(p){ return Math.max(-Math.PI/2, Math.min(Math.PI/2, p)); }
+
+// Selected block for 2D hand
+let selectedBlock = 'grass';
+let handDiv = document.getElementById('hand');
+function updateHandColor(){
+    handDiv.style.backgroundColor = selectedBlock==='grass'? 'green' : 'brown';
+}
+
+// Keyboard controls
+document.addEventListener('keydown', e=>{
+    if(e.code==='KeyW') move.forward=true;
+    if(e.code==='KeyS') move.backward=true;
+    if(e.code==='KeyA') move.left=true;
+    if(e.code==='KeyD') move.right=true;
+    if(e.code==='Space') move.jump=true;
+    if(e.code==='KeyP') placeBlock();
+    if(e.code==='KeyM') mineBlock();
+    if(keys.hasOwnProperty(e.code)) keys[e.code]=true;
+    if(e.code==='Digit1'){ selectedBlock='grass'; updateHandColor(); }
+    if(e.code==='Digit2'){ selectedBlock='wood'; updateHandColor(); }
+});
+document.addEventListener('keyup', e=>{
+    if(e.code==='KeyW') move.forward=false;
+    if(e.code==='KeyS') move.backward=false;
+    if(e.code==='KeyA') move.left=false;
+    if(e.code==='KeyD') move.right=false;
+    if(e.code==='Space') move.jump=false;
+    if(keys.hasOwnProperty(e.code)) keys[e.code]=false;
+});
+
+// Collision detection
+function isBlocked(x,y,z){
+    return blocks[`${Math.floor(x)},${Math.floor(y)},${Math.floor(z)}`] !== undefined;
+}
+
+// Place & mine
+function placeBlock(){
+    let dir = new THREE.Vector3(0,0,-1).applyEuler(new THREE.Euler(pitchObject.rotation.x, yawObject.rotation.y,0,'YXZ'));
+    let pos = player.position.clone().add(dir);
+    addBlock(Math.floor(pos.x), Math.floor(pos.y), Math.floor(pos.z), selectedBlock);
+}
+function mineBlock(){
+    let dir = new THREE.Vector3(0,0,-1).applyEuler(new THREE.Euler(pitchObject.rotation.x, yawObject.rotation.y,0,'YXZ'));
+    let pos = player.position.clone().add(dir);
+    removeBlock(Math.floor(pos.x), Math.floor(pos.y), Math.floor(pos.z));
+}
+
+// FPS counter setup
+let fpsDiv = document.getElementById('fps');
+let lastTime = performance.now();
+let frames = 0;
+let fps = 0;
+
+// Animate
+function animate(){
+    requestAnimationFrame(animate);
+
+    // FPS counter
+    frames++;
+    let now = performance.now();
+    if(now - lastTime >= 1000){
+        fps = frames;
+        frames = 0;
+        lastTime = now;
+        fpsDiv.textContent = `FPS: ${fps}`;
+    }
+
+    // Arrow key look
+    if(keys.ArrowLeft)  yawObject.rotation.y += lookSpeed;
+    if(keys.ArrowRight) yawObject.rotation.y -= lookSpeed;
+    if(keys.ArrowUp)    pitchObject.rotation.x += lookSpeed;
+    if(keys.ArrowDown)  pitchObject.rotation.x -= lookSpeed;
+    pitchObject.rotation.x = clampPitch(pitchObject.rotation.x);
+
+    // Movement with collision
+    let dir = new THREE.Vector3();
+    if(move.forward) dir.z -= 1;
+    if(move.backward) dir.z += 1;
+    if(move.left) dir.x -= 1;
+    if(move.right) dir.x += 1;
+    dir.normalize().applyEuler(new THREE.Euler(0, yawObject.rotation.y,0));
+
+    // X-axis collision
+    let newX = player.position.x + dir.x*0.1;
+    if(!isBlocked(newX, player.position.y, player.position.z)) player.position.x = newX;
+    // Z-axis collision
+    let newZ = player.position.z + dir.z*0.1;
+    if(!isBlocked(player.position.x, player.position.y, newZ)) player.position.z = newZ;
+
+    // Gravity & Y collision
+    player.velocityY -= 0.01;
+    let nextY = player.position.y + player.velocityY;
+
+    if(player.velocityY <= 0){ // falling
+        if(isBlocked(player.position.x, nextY, player.position.z)){
+            player.velocityY = 0;
+            player.position.y = Math.floor(player.position.y); // stick exactly on block
+        } else {
+            player.position.y = nextY;
+        }
+    } else { // jumping
+        if(isBlocked(player.position.x, nextY + player.height, player.position.z)){
+            player.velocityY = 0; // hit ceiling
+        } else {
+            player.position.y = nextY;
+        }
+    }
+
+    // Jump
+    if(move.jump && player.velocityY===0) player.velocityY=0.2;
+
+    // Update camera position
+    yawObject.position.copy(player.position);
+
+    renderer.render(scene,camera);
+}
+animate();
+
+// Resize
+window.addEventListener('resize', ()=>{
+    camera.aspect = window.innerWidth/window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+updateHandColor();
+
+</script>
+</body>
+</html>

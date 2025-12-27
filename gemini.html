@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Geminis Sandbox</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: sans-serif; background: #000; }
+        #ui {
+            position: absolute; top: 10px; left: 10px; color: white;
+            background: rgba(0,0,0,0.6); padding: 15px; border-radius: 8px; pointer-events: none;
+            z-index: 10;
+        }
+        #hotbar {
+            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 10px; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 5px;
+        }
+        .slot {
+            width: 50px; height: 50px; border: 2px solid #555; 
+            display: flex; align-items: center; justify-content: center; color: white;
+        }
+        .active { border-color: yellow; background: rgba(255,255,255,0.2); }
+        #fps {
+            position: absolute; top: 10px; right: 10px; color: #00ff00;
+            background: rgba(0,0,0,0.6); padding: 5px 10px; border-radius: 4px; font-family: monospace;
+        }
+        #crosshair {
+            position: absolute; top: 50%; left: 50%; width: 6px; height: 6px;
+            background: white; border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none;
+        }
+        #overlay {
+            position: absolute; width: 100%; height: 100%; background: rgba(0,0,0,0.7);
+            color: white; display: flex; align-items: center; justify-content: center;
+            font-size: 24px; cursor: pointer; z-index: 20;
+        }
+    </style>
+</head>
+<body>
+    <div id="overlay">CLICK TO PLAY</div>
+    <div id="ui">
+        <strong>WASD</strong>: Move | <strong>Space</strong>: Jump<br>
+        <strong>Arrows</strong>: Look | <strong>M</strong>: Mine | <strong>P</strong>: Place<br>
+        <strong>1 / 2</strong>: Switch Blocks
+    </div>
+    <div id="hotbar">
+        <div id="slot1" class="slot active">Wood</div>
+        <div id="slot2" class="slot">Grass</div>
+    </div>
+    <div id="fps">FPS: 0</div>
+    <div id="crosshair"></div>
+
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87ceeb);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const light = new THREE.HemisphereLight(0xffffff, 0x444444, 1.5);
+        scene.add(light);
+
+        // --- Game State ---
+        const blocks = [];
+        const keys = {};
+        let velocityY = 0;
+        let canJump = false;
+        let yaw = 0, pitch = 0;
+        const playerHeight = 1.6;
+
+        // Block Materials
+        const grassMat = new THREE.MeshStandardMaterial({ color: 0x228b22 });
+        const woodMat = new THREE.MeshStandardMaterial({ color: 0x8b4513 });
+        let currentMaterial = woodMat;
+
+        // --- Hand Viewmodel ---
+        const handGroup = new THREE.Group();
+        const arm = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 1), new THREE.MeshStandardMaterial({ color: 0xe0ac69 }));
+        arm.position.set(0.5, -0.5, -0.8);
+        handGroup.add(arm);
+
+        const heldBlock = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.3), currentMaterial);
+        heldBlock.position.set(0.5, -0.3, -1.2);
+        handGroup.add(heldBlock);
+        camera.add(handGroup);
+        scene.add(camera);
+
+        // Build 16x16 Floor
+        const geometry = new THREE.BoxGeometry(1, 1, 1);
+        for (let x = 0; x < 16; x++) {
+            for (let z = 0; z < 16; z++) {
+                const cube = new THREE.Mesh(geometry, grassMat);
+                cube.position.set(x, 0, z);
+                scene.add(cube);
+                blocks.push(cube);
+            }
+        }
+
+        camera.position.set(8, 2, 8);
+
+        // --- Functions ---
+        function switchMaterial(type) {
+            if (type === 'wood') {
+                currentMaterial = woodMat;
+                document.getElementById('slot1').classList.add('active');
+                document.getElementById('slot2').classList.remove('active');
+            } else {
+                currentMaterial = grassMat;
+                document.getElementById('slot2').classList.add('active');
+                document.getElementById('slot1').classList.remove('active');
+            }
+            heldBlock.material = currentMaterial;
+        }
+
+        function placeBlock() {
+            const raycaster = new THREE.Raycaster();
+            raycaster.setFromCamera(new THREE.Vector2(0,0), camera);
+            const intersects = raycaster.intersectObjects(blocks);
+            if (intersects.length > 0 && intersects[0].distance < 4) {
+                const pos = intersects[0].object.position.clone().add(intersects[0].face.normal);
+                const newBlock = new THREE.Mesh(geometry, currentMaterial);
+                newBlock.position.copy(pos);
+                scene.add(newBlock);
+                blocks.push(newBlock);
+                handGroup.position.z += 0.2; // Punch animation
+            }
+        }
+
+        function mineBlock() {
+            const raycaster = new THREE.Raycaster();
+            raycaster.setFromCamera(new THREE.Vector2(0,0), camera);
+            const intersects = raycaster.intersectObjects(blocks);
+            if (intersects.length > 0 && intersects[0].distance < 4) {
+                scene.remove(intersects[0].object);
+                blocks.splice(blocks.indexOf(intersects[0].object), 1);
+                handGroup.position.z += 0.2;
+            }
+        }
+
+        // --- Listeners ---
+        document.getElementById('overlay').addEventListener('click', () => {
+            renderer.domElement.requestPointerLock();
+            document.getElementById('overlay').style.display = 'none';
+        });
+
+        document.addEventListener('keydown', (e) => { 
+            keys[e.code] = true; 
+            if(e.code === 'KeyP') placeBlock();
+            if(e.code === 'KeyM') mineBlock();
+            if(e.code === 'Digit1') switchMaterial('wood');
+            if(e.code === 'Digit2') switchMaterial('grass');
+        });
+        document.addEventListener('keyup', (e) => { keys[e.code] = false; });
+
+        // --- Physics & Collision ---
+        function getBlockUnderneath() {
+            let highestY = -Infinity;
+            for (let block of blocks) {
+                const bP = block.position;
+                if (Math.abs(camera.position.x - bP.x) < 0.6 && Math.abs(camera.position.z - bP.z) < 0.6) {
+                    if (bP.y <= camera.position.y - playerHeight + 0.5) {
+                        highestY = Math.max(highestY, bP.y);
+                    }
+                }
+            }
+            return highestY;
+        }
+
+        function checkWallCollision(x, z) {
+            for (let block of blocks) {
+                const bP = block.position;
+                if (Math.abs(x - bP.x) < 0.7 && Math.abs(z - bP.z) < 0.7) {
+                    if (camera.position.y >= bP.y - 0.5 && camera.position.y <= bP.y + 1.5) return true;
+                }
+            }
+            return false;
+        }
+
+        // --- Animation Loop ---
+        let lastTime = performance.now();
+        let frames = 0;
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = performance.now();
+            frames++;
+            if (time > lastTime + 1000) {
+                document.getElementById('fps').innerText = "FPS: " + frames;
+                lastTime = time; frames = 0;
+            }
+
+            // Look
+            const lookSpeed = 0.04;
+            if (keys['ArrowLeft']) yaw += lookSpeed;
+            if (keys['ArrowRight']) yaw -= lookSpeed;
+            if (keys['ArrowUp']) pitch += lookSpeed;
+            if (keys['ArrowDown']) pitch -= lookSpeed;
+            pitch = Math.max(-1.5, Math.min(1.5, pitch));
+            camera.rotation.set(pitch, yaw, 0, 'YXZ');
+
+            // Move
+            const moveSpeed = 0.12;
+            let dx = 0, dz = 0;
+            let moving = false;
+            if (keys['KeyW']) { dx -= Math.sin(yaw); dz -= Math.cos(yaw); moving = true; }
+            if (keys['KeyS']) { dx += Math.sin(yaw); dz += Math.cos(yaw); moving = true; }
+            if (keys['KeyA']) { dx -= Math.cos(yaw); dz += Math.sin(yaw); moving = true; }
+            if (keys['KeyD']) { dx += Math.cos(yaw); dz -= Math.sin(yaw); moving = true; }
+
+            const nX = camera.position.x + dx * moveSpeed;
+            const nZ = camera.position.z + dz * moveSpeed;
+            if (!checkWallCollision(nX, camera.position.z)) camera.position.x = nX;
+            if (!checkWallCollision(camera.position.x, nZ)) camera.position.z = nZ;
+
+            // Sway
+            const sway = moving ? 0.05 : 0.01;
+            handGroup.position.y = Math.sin(time * 0.01) * sway;
+            handGroup.position.z += (0 - handGroup.position.z) * 0.1;
+
+            // Gravity
+            const floor = getBlockUnderneath();
+            const floorLevel = (floor === -Infinity) ? -10 : floor + 0.5 + playerHeight;
+            if (keys['Space'] && canJump) { velocityY = 0.15; canJump = false; }
+            velocityY -= 0.008;
+            camera.position.y += velocityY;
+
+            if (camera.position.y <= floorLevel) {
+                camera.position.y = floorLevel;
+                velocityY = 0; canJump = true;
+            }
+
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+</html>
